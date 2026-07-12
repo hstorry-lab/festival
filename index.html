@@ -604,16 +604,22 @@
 <script>
 (function(){
   // ---------- Storage adapter ----------
-  // window.storage (shared, cross-device) only exists inside Claude.ai's artifact
-  // preview. When this file is hosted elsewhere (Vercel, downloaded + opened, etc.)
-  // that API doesn't exist, and every save would silently/loudly fail. Fall back to
-  // localStorage in that case so saving always works — just per-device instead of shared.
+  // Priority: window.storage (shared, only exists inside Claude.ai's artifact preview)
+  // > IndexedDB (large per-device quota — typically hundreds of MB or more, browser-managed)
+  // > localStorage (small per-device quota, ~5-10MB total — last resort only).
   const hasNativeStorage = typeof window.storage === 'object' && window.storage !== null
     && typeof window.storage.get === 'function' && typeof window.storage.set === 'function';
 
   const LOCAL_NS = 'stubs_local_v1:';
+
+  const nativeBackend = hasNativeStorage ? {
+    isNative: true,
+    async get(key, shared){ return window.storage.get(key, shared !== false); },
+    async set(key, value, shared){ return window.storage.set(key, value, shared !== false); },
+    async delete(key, shared){ return window.storage.delete(key, shared !== false); }
+  } : null;
+
   const localBackend = {
-    isNative: false,
     async get(key){
       try {
         const raw = localStorage.getItem(LOCAL_NS + key);
@@ -625,7 +631,14 @@
       try {
         localStorage.setItem(LOCAL_NS + key, value);
         return { key, value, shared: false };
-      } catch(e){ console.error('localStorage set failed:', e); return null; }
+      } catch(e){
+        console.error('localStorage set failed:', e);
+        const isQuota = e && (e.name === 'QuotaExceededError' || e.code === 22 || e.code === 1014);
+        window.__lastStorageError = isQuota
+          ? '이 브라우저의 저장 공간이 가득 찼어요. 오래된 기록의 사진을 지우거나 기록을 정리해주세요.'
+          : (e && e.message) || '알 수 없는 저장 오류';
+        return null;
+      }
     },
     async delete(key){
       try {
@@ -635,15 +648,108 @@
     }
   };
 
-  const nativeBackend = hasNativeStorage ? {
-    isNative: true,
-    async get(key, shared){ return window.storage.get(key, shared !== false); },
-    async set(key, value, shared){ return window.storage.set(key, value, shared !== false); },
-    async delete(key, shared){ return window.storage.delete(key, shared !== false); }
-  } : null;
+  // IndexedDB gives us a much bigger per-device quota than localStorage, with the
+  // same "just works, no login" experience. Falls back to localStorage if IndexedDB
+  // isn't available for some reason (very rare in modern browsers).
+  const hasIndexedDB = typeof indexedDB !== 'undefined';
+  const IDB_NAME = 'stubs_idb_v1';
+  const IDB_STORE = 'kv';
+  let dbPromise = null;
 
-  const Store = hasNativeStorage ? nativeBackend : localBackend;
-  window.__storageIsLocalFallback = !hasNativeStorage;
+  function openDB(){
+    if (dbPromise) return dbPromise;
+    dbPromise = new Promise((resolve, reject)=>{
+      const req = indexedDB.open(IDB_NAME, 1);
+      req.onupgradeneeded = ()=>{
+        req.result.createObjectStore(IDB_STORE, { keyPath: 'key' });
+      };
+      req.onsuccess = ()=> resolve(req.result);
+      req.onerror = ()=> reject(req.error);
+    });
+    return dbPromise;
+  }
+
+  const idbBackend = {
+    async get(key){
+      try {
+        const db = await openDB();
+        return await new Promise((resolve)=>{
+          const tx = db.transaction(IDB_STORE, 'readonly');
+          const req = tx.objectStore(IDB_STORE).get(key);
+          req.onsuccess = ()=> resolve(req.result ? { key, value: req.result.value, shared: false } : null);
+          req.onerror = ()=> resolve(null);
+        });
+      } catch(e){ console.error('IndexedDB get failed:', e); return null; }
+    },
+    async set(key, value){
+      try {
+        const db = await openDB();
+        return await new Promise((resolve)=>{
+          const tx = db.transaction(IDB_STORE, 'readwrite');
+          tx.objectStore(IDB_STORE).put({ key, value });
+          tx.oncomplete = ()=> resolve({ key, value, shared: false });
+          tx.onerror = ()=>{
+            const err = tx.error;
+            const isQuota = err && (err.name === 'QuotaExceededError');
+            window.__lastStorageError = isQuota
+              ? '저장 공간이 가득 찼어요. 오래된 기록의 사진을 지우거나 기록을 정리해주세요.'
+              : (err && err.message) || 'IndexedDB 저장 오류';
+            resolve(null);
+          };
+        });
+      } catch(e){ console.error('IndexedDB set failed:', e); window.__lastStorageError = e.message; return null; }
+    },
+    async delete(key){
+      try {
+        const db = await openDB();
+        return await new Promise((resolve)=>{
+          const tx = db.transaction(IDB_STORE, 'readwrite');
+          tx.objectStore(IDB_STORE).delete(key);
+          tx.oncomplete = ()=> resolve({ key, deleted: true, shared: false });
+          tx.onerror = ()=> resolve(null);
+        });
+      } catch(e){ console.error('IndexedDB delete failed:', e); return null; }
+    }
+  };
+
+  // One-time migration: copy anything already saved under localStorage (from before
+  // this upgrade) into IndexedDB, so switching storage backends doesn't lose data.
+  async function migrateLocalStorageIntoIDB(){
+    try {
+      const keysToMigrate = [];
+      for (let i=0; i<localStorage.length; i++){
+        const fullKey = localStorage.key(i);
+        if (fullKey && fullKey.startsWith(LOCAL_NS)){
+          keysToMigrate.push(fullKey.slice(LOCAL_NS.length));
+        }
+      }
+      for (const key of keysToMigrate){
+        const existing = await idbBackend.get(key);
+        if (existing) continue; // already migrated
+        const raw = localStorage.getItem(LOCAL_NS + key);
+        if (raw !== null) await idbBackend.set(key, raw);
+      }
+    } catch(e){ console.error('localStorage → IndexedDB migration failed:', e); }
+  }
+
+  let Store, storageBackendType;
+  if (hasNativeStorage){
+    Store = nativeBackend;
+    storageBackendType = 'native';
+  } else if (hasIndexedDB){
+    Store = idbBackend;
+    storageBackendType = 'idb';
+  } else {
+    Store = localBackend;
+    storageBackendType = 'local';
+  }
+  window.__storageIsLocalFallback = storageBackendType !== 'native';
+  window.__storageBackendType = storageBackendType;
+
+  if (storageBackendType === 'idb'){
+    // fire-and-forget; entries load a moment later anyway via loadEntries()
+    migrateLocalStorageIntoIDB();
+  }
 
   const STORAGE_KEY_PREFIX = 'stub_entry:';
   const LIST_KEY = 'stub_entry_ids';
@@ -706,7 +812,9 @@
       { dim: 750,  q: 0.6 },
       { dim: 600,  q: 0.5 },
       { dim: 480,  q: 0.45 },
-      { dim: 360,  q: 0.4 }
+      { dim: 360,  q: 0.4 },
+      { dim: 280,  q: 0.35 },
+      { dim: 220,  q: 0.3 }
     ];
     let result = null;
     for (const step of steps){
@@ -738,12 +846,12 @@
     const ids = entries.map(e=>e.id);
     if (extraId && !ids.includes(extraId)) ids.push(extraId);
     const result = await Store.set(LIST_KEY, JSON.stringify(ids), true);
-    if (!result) throw new Error('목록 저장 실패 (storage.set이 빈 값을 반환함)');
+    if (!result) throw new Error(window.__lastStorageError || '목록 저장에 실패했어요');
   }
 
   async function saveEntry(entry){
     const result = await Store.set(STORAGE_KEY_PREFIX + entry.id, JSON.stringify(entry), true);
-    if (!result) throw new Error('기록 저장 실패 (storage.set이 빈 값을 반환함, 사진 용량이 원인일 수 있어요)');
+    if (!result) throw new Error(window.__lastStorageError || '기록 저장에 실패했어요');
   }
 
   async function deleteEntryStorage(id){
@@ -1399,8 +1507,13 @@
     if (!file) return;
     $('photoStatus').textContent = '사진 처리 중…';
     try {
-      // target well under the 5MB per-key storage limit, leaving room for other fields
-      const dataUrl = await compressImageToLimit(file, 1500000);
+      // Native shared storage allows up to 5MB per item, so we can be generous there.
+      // localStorage (Vercel fallback) has a small TOTAL quota shared across every
+      // saved entry, so photos there need to be much smaller to leave room for more.
+      // IndexedDB has a large quota, similar headroom to the native shared storage.
+      // Plain localStorage (rare fallback-of-fallback) needs to stay very small.
+      const targetChars = window.__storageBackendType === 'local' ? 250000 : 1500000;
+      const dataUrl = await compressImageToLimit(file, targetChars);
       currentPhotoData = dataUrl;
       $('photoPreview').src = dataUrl;
       $('photoPreviewWrap').style.display = 'block';
