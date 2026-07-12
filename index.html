@@ -549,7 +549,7 @@
 
     <div class="field" style="position:relative;">
       <label>아티스트</label>
-      <input type="text" id="fArtist" placeholder="예) 아이유" autocomplete="off">
+      <input type="text" id="fArtist" placeholder="예) 아이유, 세븐틴 (여러 명이면 콤마로 구분)" autocomplete="off">
       <div id="artistSuggest" class="suggest-dropdown"></div>
     </div>
 
@@ -753,6 +753,14 @@
   function fmtMoney(n){
     if (!n) return '0원';
     return Number(n).toLocaleString('ko-KR') + '원';
+  }
+
+  // A single entry can list multiple artists separated by commas
+  // (e.g. "아이유, 세븐틴" for a joint show) — split them out so stats
+  // count each artist individually rather than as one combined string.
+  function splitArtists(artistStr){
+    if (!artistStr) return [];
+    return artistStr.split(',').map(a=>a.trim()).filter(Boolean);
   }
   function fmtDateShort(d){
     const dt = new Date(d + 'T00:00:00');
@@ -1180,9 +1188,13 @@
     const count = scopeEntries.length;
     const total = scopeEntries.reduce((s,e)=> s + (Number(e.price)||0), 0);
 
-    // top 5 artists
+    // top 5 artists (split comma-separated lineups so each artist counts separately)
     const artistCounts = {};
-    scopeEntries.forEach(e=>{ artistCounts[e.artist] = (artistCounts[e.artist]||0) + 1; });
+    scopeEntries.forEach(e=>{
+      splitArtists(e.artist).forEach(name=>{
+        artistCounts[name] = (artistCounts[name]||0) + 1;
+      });
+    });
     const topArtists = Object.entries(artistCounts).sort((a,b)=> b[1]-a[1]).slice(0,5);
     const maxArtistCount = topArtists.length ? topArtists[0][1] : 1;
 
