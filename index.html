@@ -4,7 +4,6 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>나락도 락이다 — 공연 기록</title>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@500;600;700;800&family=Nunito:ital,wght@0,400;0,600;0,700;0,800;1,600&display=swap" rel="stylesheet">
@@ -166,6 +165,68 @@
     color: rgba(43,76,74,0.45);
   }
 
+  .year-toggle {
+    display: flex; gap: 4px;
+    background: rgba(255,255,255,0.5);
+    border-radius: 10px;
+    padding: 3px;
+  }
+  .year-toggle button {
+    border: none; background: transparent;
+    padding: 4px 10px;
+    font-size: 10px; font-weight: 800;
+    color: rgba(43,76,74,0.5);
+    border-radius: 7px;
+    cursor: pointer;
+  }
+  .year-toggle button.active {
+    background: #2B8A7E;
+    color: #fff;
+  }
+
+  .stats-block { margin-top: 14px; }
+  .stats-block-title {
+    font-size: 10px; font-weight: 800; letter-spacing: 0.2px;
+    color: rgba(43,76,74,0.55);
+    margin-bottom: 8px;
+  }
+
+  .top-artist-row {
+    display: flex; align-items: center; gap: 10px;
+    padding: 8px 4px;
+  }
+  .top-artist-rank {
+    width: 20px; text-align: center;
+    font-family: 'Baloo 2', sans-serif;
+    font-size: 13px; font-weight: 700;
+    color: #2B8A7E;
+    flex-shrink: 0;
+  }
+  .top-artist-name { flex: 1; font-size: 13px; font-weight: 700; color: #1B3B39; }
+  .top-artist-bar-wrap { flex: 1; background: rgba(43,76,74,0.08); border-radius: 6px; height: 8px; overflow: hidden; }
+  .top-artist-bar { height: 100%; background: linear-gradient(90deg, #8FC7F2, #7FD8D0); border-radius: 6px; }
+  .top-artist-count { font-size: 11px; font-weight: 800; color: rgba(43,76,74,0.55); flex-shrink: 0; width: 34px; text-align: right; }
+
+  .cat-table { width: 100%; border-collapse: collapse; }
+  .cat-table td { padding: 7px 4px; font-size: 12px; font-weight: 700; color: #2B4C4A; border-bottom: 1px solid rgba(43,76,74,0.08); }
+  .cat-table tr:last-child td { border-bottom: none; }
+  .cat-table td:last-child { text-align: right; color: #2B8A7E; }
+
+  .month-chart { display: flex; align-items: flex-end; gap: 4px; height: 90px; padding-top: 6px; }
+  .month-col { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; height: 100%; gap: 4px; }
+  .month-bar { width: 100%; background: linear-gradient(180deg, #8FC7F2, #7FD8D0); border-radius: 4px 4px 2px 2px; min-height: 2px; }
+  .month-label { font-size: 8px; font-weight: 800; color: rgba(43,76,74,0.45); }
+  .month-count { font-size: 9px; font-weight: 800; color: #2B8A7E; }
+
+  .venue-row {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 9px 4px;
+    border-bottom: 1px solid rgba(43,76,74,0.08);
+  }
+  .venue-row:last-child { border-bottom: none; }
+  .venue-name { font-size: 12px; font-weight: 700; color: #1B3B39; }
+  .venue-sub { font-size: 10px; font-weight: 600; color: rgba(43,76,74,0.45); margin-top: 1px; }
+  .venue-spend { font-size: 12px; font-weight: 800; color: #E8734A; text-align: right; }
   /* ---------- List ---------- */
   .list-wrap { padding: 16px 20px; display: flex; flex-direction: column; gap: 14px; }
   .list-summary {
@@ -428,8 +489,6 @@
     font-family: 'Baloo 2', sans-serif; letter-spacing: 0.5px; color: rgba(43,76,74,0.4);
     font-size: 13px; font-weight: 600;
   }
-
-  #shareCanvas { position: fixed; top: -9999px; left: -9999px; }
 </style>
 </head>
 <body>
@@ -445,9 +504,6 @@
     <div class="tabs">
       <div class="tab active" data-tab="calendar">캘린더</div>
       <div class="tab" data-tab="list">전체 기록</div>
-    </div>
-    <div id="localFallbackNotice" style="display:none; margin-top:12px; padding:8px 12px; background:rgba(255,158,128,0.15); border:1px solid rgba(232,115,74,0.3); border-radius:10px; font-size:11px; font-weight:700; color:#E8734A; line-height:1.5;">
-      ⚠️ 이 기기에만 저장돼요. 다른 사람과 공유되지 않아요.
     </div>
   </header>
 
@@ -492,9 +548,14 @@
     </div>
 
     <div class="field" style="position:relative;">
-      <label>아티스트 / 공연명</label>
-      <input type="text" id="fArtist" placeholder="예) IU CONCERT : HEREH WORLD TOUR" autocomplete="off">
+      <label>아티스트</label>
+      <input type="text" id="fArtist" placeholder="예) 아이유" autocomplete="off">
       <div id="artistSuggest" class="suggest-dropdown"></div>
+    </div>
+
+    <div class="field">
+      <label>공연명</label>
+      <input type="text" id="fEventName" placeholder="예) IU CONCERT : HEREH WORLD TOUR" autocomplete="off">
     </div>
 
     <div class="field-row">
@@ -538,9 +599,6 @@
 </div>
 
 <div class="toast" id="toast"></div>
-
-<!-- offscreen render target for sharing -->
-<div id="shareCanvas"></div>
 
 <script>
 (function(){
@@ -588,12 +646,14 @@
 
   const STORAGE_KEY_PREFIX = 'stub_entry:';
   const LIST_KEY = 'stub_entry_ids';
+
   let entries = [];
   let currentTab = 'calendar';
   let calYear, calMonth; // 0-indexed month
   let selectedDate = null;
   let editingId = null;
   let currentPhotoData = ''; // base64 data URL currently attached to the form
+  let statsScope = 'year'; // 'year' | 'all'
 
   const $ = (id) => document.getElementById(id);
 
@@ -722,16 +782,309 @@
     return 'NO. ' + String(s % 999999).padStart(6,'0');
   }
 
-  function stubHTML(entry, forShare){
+  // ---------- Share image (drawn directly on <canvas>, not via html2canvas) ----------
+  // html2canvas doesn't support object-fit or writing-mode, which broke photo cropping
+  // and made the vertical price text overlap. Drawing manually avoids both problems
+  // and guarantees a correct, predictable aspect ratio every time.
+  function roundRectPath(ctx, x, y, w, h, r){
+    ctx.beginPath();
+    ctx.moveTo(x+r, y);
+    ctx.arcTo(x+w, y, x+w, y+h, r);
+    ctx.arcTo(x+w, y+h, x, y+h, r);
+    ctx.arcTo(x, y+h, x, y, r);
+    ctx.arcTo(x, y, x+w, y, r);
+    ctx.closePath();
+  }
+
+  function drawCover(ctx, img, dx, dy, dW, dH){
+    const ir = img.width / img.height;
+    const tr = dW / dH;
+    let sx, sy, sw, sh;
+    if (ir > tr){
+      sh = img.height;
+      sw = sh * tr;
+      sx = (img.width - sw) / 2;
+      sy = 0;
+    } else {
+      sw = img.width;
+      sh = sw / tr;
+      sx = 0;
+      sy = (img.height - sh) / 2;
+    }
+    ctx.drawImage(img, sx, sy, sw, sh, dx, dy, dW, dH);
+  }
+
+  function wrapCanvasText(ctx, text, maxWidth, maxLines){
+    const chars = Array.from(text || '');
+    const lines = [];
+    let current = '';
+    for (const ch of chars){
+      const test = current + ch;
+      if (ctx.measureText(test).width > maxWidth && current.length > 0){
+        lines.push(current);
+        current = ch;
+        if (lines.length >= maxLines) { current = ''; break; }
+      } else {
+        current = test;
+      }
+    }
+    if (current) lines.push(current);
+    if (!lines.length) return [''];
+    if (lines.length > maxLines) lines.length = maxLines;
+    const joinedLen = lines.join('').length;
+    if (joinedLen < chars.length){
+      let last = lines[lines.length-1];
+      while (ctx.measureText(last + '…').width > maxWidth && last.length > 0){
+        last = last.slice(0, -1);
+      }
+      lines[lines.length-1] = last + '…';
+    }
+    return lines;
+  }
+
+  function truncateCanvasText(ctx, text, maxWidth){
+    if (ctx.measureText(text).width <= maxWidth) return text;
+    let t = text;
+    while (t.length > 0 && ctx.measureText(t + '…').width > maxWidth){
+      t = t.slice(0, -1);
+    }
+    return t + '…';
+  }
+
+  async function buildStubCanvas(entry){
+    const SCALE = 2;
+    const W = 420 * SCALE;
+    const outerPad = 24 * SCALE;
+    const cardX = outerPad;
+    const cardW = W - outerPad*2;
+    const padX = 18 * SCALE;
+    const padTop = 18 * SCALE;
+    const padBottom = 18 * SCALE;
+    const radius = 16 * SCALE;
+    const contentW = cardW - padX*2;
+
+    try {
+      await Promise.all([
+        document.fonts.load(`700 ${19*SCALE}px "Baloo 2"`),
+        document.fonts.load(`600 ${14*SCALE}px "Baloo 2"`),
+        document.fonts.load(`700 ${20*SCALE}px "Baloo 2"`),
+        document.fonts.load(`800 ${10*SCALE}px "Nunito"`),
+        document.fonts.load(`600 ${12*SCALE}px "Nunito"`),
+        document.fonts.load(`700 ${8*SCALE}px "Nunito"`)
+      ]);
+    } catch(e){ /* fonts may already be loaded; proceed regardless */ }
+
+    let img = null;
+    if (entry.photo){
+      img = await new Promise((resolve)=>{
+        const im = new Image();
+        im.onload = () => resolve(im);
+        im.onerror = () => resolve(null);
+        im.src = entry.photo;
+      });
+    }
+
+    const measure = document.createElement('canvas').getContext('2d');
+
+    const catFont   = `800 ${10*SCALE}px "Nunito", sans-serif`;
+    const titleFont = `700 ${19*SCALE}px "Baloo 2", sans-serif`;
+    const metaFont  = `600 ${12*SCALE}px "Nunito", sans-serif`;
+    const memoFont  = `600 ${11*SCALE}px "Nunito", sans-serif`;
+    const priceFont = `700 ${20*SCALE}px "Baloo 2", sans-serif`;
+    const numFont   = `700 ${8*SCALE}px "Nunito", sans-serif`;
+
+    const mainTitle = entry.eventName || entry.artist;
+    measure.font = titleFont;
+    const titleLines = wrapCanvasText(measure, mainTitle, contentW, 2);
+
+    const showArtistRow = !!(entry.eventName && entry.artist && entry.artist !== entry.eventName);
+    const metaRows = [];
+    if (showArtistRow) metaRows.push(`🎤 ${entry.artist}`);
+    metaRows.push(`📅 ${fmtDateLong(entry.date)}`);
+    if (entry.venue) metaRows.push(`📍 ${entry.venue}`);
+
+    measure.font = memoFont;
+    let memoLines = [];
+    if (entry.memo){
+      memoLines = wrapCanvasText(measure, entry.memo, contentW, 2);
+    }
+
+    // ---- layout pass ----
+    const catBadgeH = 22 * SCALE;
+    const catMarginBottom = 8 * SCALE;
+    const titleLineH = 24 * SCALE;
+    const titleMarginBottom = 10 * SCALE;
+    const metaRowH = 20 * SCALE;
+    const metaGap = 4 * SCALE;
+    const memoMarginTop = 6 * SCALE;
+    const memoLineH = 15 * SCALE;
+    const photoH = img ? 110 * SCALE : 0;
+    const photoMarginTop = img ? 12 * SCALE : 0;
+    const dividerMarginTop = 16 * SCALE;
+    const footerMarginTop = 16 * SCALE;
+    const footerH = 34 * SCALE;
+    const numH = 14 * SCALE;
+
+    let contentH = catBadgeH + catMarginBottom;
+    contentH += titleLines.length * titleLineH + titleMarginBottom;
+    contentH += metaRows.length * metaRowH + Math.max(0, metaRows.length - 1) * metaGap;
+    if (memoLines.length) contentH += memoMarginTop + memoLines.length * memoLineH;
+    if (img) contentH += photoMarginTop + photoH;
+    contentH += dividerMarginTop + footerMarginTop + footerH + numH;
+
+    const cardH = padTop + contentH + padBottom;
+    const H = outerPad + cardH + outerPad;
+
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.round(W);
+    canvas.height = Math.round(H);
+    const ctx = canvas.getContext('2d');
+
+    // background
+    const bgGrad = ctx.createLinearGradient(0, 0, W, H);
+    bgGrad.addColorStop(0, '#EAF6F3');
+    bgGrad.addColorStop(1, '#DCEEF8');
+    ctx.fillStyle = bgGrad;
+    ctx.fillRect(0, 0, W, H);
+
+    // card shadow + fill
+    ctx.save();
+    ctx.shadowColor = 'rgba(43,76,74,0.22)';
+    ctx.shadowBlur = 24 * SCALE;
+    ctx.shadowOffsetY = 8 * SCALE;
+    roundRectPath(ctx, cardX, outerPad, cardW, cardH, radius);
+    ctx.fillStyle = '#FFFDF8';
+    ctx.fill();
+    ctx.restore();
+
+    ctx.save();
+    roundRectPath(ctx, cardX, outerPad, cardW, cardH, radius);
+    ctx.clip();
+
+    let cy = outerPad + padTop;
+    const cx = cardX + padX;
+
+    // category badge
+    measure.font = catFont;
+    const catText = entry.category || '';
+    const catPadX = 9 * SCALE;
+    const catW = measure.measureText(catText).width + catPadX * 2;
+    roundRectPath(ctx, cx, cy, catW, catBadgeH, 8 * SCALE);
+    ctx.fillStyle = 'rgba(127,216,208,0.22)';
+    ctx.fill();
+    ctx.font = catFont;
+    ctx.fillStyle = '#2B8A7E';
+    ctx.textBaseline = 'middle';
+    ctx.textAlign = 'left';
+    ctx.fillText(catText, cx + catPadX, cy + catBadgeH/2 + 1);
+    cy += catBadgeH + catMarginBottom;
+
+    // title
+    ctx.font = titleFont;
+    ctx.fillStyle = '#1B3B39';
+    ctx.textBaseline = 'alphabetic';
+    titleLines.forEach((line, i)=>{
+      ctx.fillText(line, cx, cy + titleLineH*(i+1) - 7*SCALE);
+    });
+    cy += titleLines.length * titleLineH + titleMarginBottom;
+
+    // meta rows
+    ctx.font = metaFont;
+    ctx.fillStyle = 'rgba(43,76,74,0.65)';
+    metaRows.forEach((text, i)=>{
+      const displayText = truncateCanvasText(ctx, text, contentW);
+      ctx.fillText(displayText, cx, cy + metaRowH*0.72 + i*(metaRowH+metaGap));
+    });
+    cy += metaRows.length * metaRowH + Math.max(0, metaRows.length - 1) * metaGap;
+
+    // memo
+    if (memoLines.length){
+      cy += memoMarginTop;
+      ctx.font = memoFont;
+      ctx.fillStyle = 'rgba(43,76,74,0.5)';
+      memoLines.forEach((line, i)=>{
+        ctx.fillText(line, cx, cy + memoLineH*(i+1) - 4*SCALE);
+      });
+      cy += memoLines.length * memoLineH;
+    }
+
+    // photo (properly cropped, never stretched)
+    if (img){
+      cy += photoMarginTop;
+      ctx.save();
+      roundRectPath(ctx, cx, cy, contentW, photoH, 10*SCALE);
+      ctx.clip();
+      drawCover(ctx, img, cx, cy, contentW, photoH);
+      ctx.restore();
+      cy += photoH;
+    }
+
+    cy += dividerMarginTop;
+
+    // dashed divider with punch-hole notches at both edges
+    ctx.strokeStyle = 'rgba(43,76,74,0.2)';
+    ctx.lineWidth = 2 * SCALE;
+    ctx.setLineDash([6*SCALE, 5*SCALE]);
+    ctx.beginPath();
+    ctx.moveTo(cardX + 14*SCALE, cy);
+    ctx.lineTo(cardX + cardW - 14*SCALE, cy);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    const holeR = 8 * SCALE;
+    ctx.fillStyle = bgGrad;
+    ctx.beginPath(); ctx.arc(cardX, cy, holeR, 0, Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.arc(cardX + cardW, cy, holeR, 0, Math.PI*2); ctx.fill();
+
+    cy += footerMarginTop;
+
+    // footer: price (left) + barcode (right), both horizontal — no vertical text
+    ctx.font = priceFont;
+    ctx.fillStyle = '#4A7FBF';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'alphabetic';
+    ctx.fillText(fmtMoney(entry.price), cx, cy + footerH*0.68);
+
+    const bars = barcodeBars(entry.id);
+    const barW = 2 * SCALE, barGap = 1.5 * SCALE;
+    const barcodeW = bars.length * (barW + barGap) - barGap;
+    const barcodeX = cardX + cardW - padX - barcodeW;
+    const barcodeBaseY = cy + footerH;
+    ctx.fillStyle = 'rgba(43,76,74,0.4)';
+    bars.forEach((h, i)=>{
+      const bh = h * SCALE * 0.85;
+      ctx.fillRect(barcodeX + i*(barW+barGap), barcodeBaseY - bh, barW, bh);
+    });
+
+    cy += footerH;
+
+    // ticket number under barcode
+    ctx.font = numFont;
+    ctx.fillStyle = 'rgba(43,76,74,0.35)';
+    ctx.textAlign = 'right';
+    ctx.fillText(ticketNumber(entry.id), cardX + cardW - padX, cy + numH*0.85);
+
+    ctx.restore();
+    return canvas;
+  }
+
+  function stubHTML(entry, opts){
+    opts = opts || {};
+    const forShare = opts.forShare;
+    const hidePrice = opts.hidePrice;
+    const hideActions = opts.hideActions || forShare;
     const bars = barcodeBars(entry.id);
     const barcodeDivs = bars.map(h=>`<div style="height:${h}px"></div>`).join('');
     const photo = entry.photo ? `<img class="stub-photo" src="${escapeAttr(entry.photo)}" alt="" onerror="this.style.display='none'">` : '';
+    const mainTitle = entry.eventName || entry.artist;
+    const showArtistRow = entry.eventName && entry.artist && entry.artist !== entry.eventName;
     return `
       <div class="stub" data-id="${entry.id}">
         <div class="stub-main">
           <div class="stub-cat">${escapeHtml(entry.category)}</div>
-          <div class="stub-title">${escapeHtml(entry.artist)}</div>
+          <div class="stub-title">${escapeHtml(mainTitle)}</div>
           <div class="stub-meta">
+            ${showArtistRow ? `<div class="row">🎤 ${escapeHtml(entry.artist)}</div>` : ''}
             <div class="row">📅 ${fmtDateLong(entry.date)}</div>
             ${entry.venue ? `<div class="row">📍 ${escapeHtml(entry.venue)}</div>` : ''}
             ${entry.memo ? `<div class="row" style="margin-top:4px; color:rgba(26,26,26,0.5);">${escapeHtml(entry.memo)}</div>` : ''}
@@ -739,12 +1092,12 @@
           ${photo}
         </div>
         <div class="stub-stub">
-          <div class="stub-price">${fmtMoney(entry.price)}</div>
+          <div class="stub-price">${hidePrice ? '🔒' : fmtMoney(entry.price)}</div>
           <div class="stub-barcode">${barcodeDivs}</div>
           <div class="stub-num">${ticketNumber(entry.id)}</div>
         </div>
       </div>
-      ${forShare ? '' : `
+      ${hideActions ? '' : `
       <div class="stub-actions">
         <button class="btn-share" onclick="window.__stubApp.share('${entry.id}')">공유</button>
         <button class="btn-edit" onclick="window.__stubApp.edit('${entry.id}')">수정</button>
@@ -801,33 +1154,66 @@
 
   function renderYearStats(){
     const box = $('yearStats');
-    const yearEntries = entries.filter(e => new Date(e.date + 'T00:00:00').getFullYear() === calYear);
+    const scopeEntries = statsScope === 'all'
+      ? entries
+      : entries.filter(e => new Date(e.date + 'T00:00:00').getFullYear() === calYear);
 
-    if (!yearEntries.length){
+    const toggleHTML = `
+      <div class="year-toggle">
+        <button data-scope="year" class="${statsScope==='year'?'active':''}">${calYear}년</button>
+        <button data-scope="all" class="${statsScope==='all'?'active':''}">전체</button>
+      </div>`;
+    const titleText = statsScope === 'all' ? '📊 전체 모아보기' : `📊 ${calYear}년 모아보기`;
+
+    if (!scopeEntries.length){
       box.innerHTML = `
         <div class="year-stats-card">
-          <div class="year-stats-title">📊 ${calYear}년 모아보기</div>
-          <div class="year-stats-empty">이 해에는 아직 기록이 없어요</div>
+          <div class="year-stats-title" style="justify-content:space-between;">
+            <span>${titleText}</span>${toggleHTML}
+          </div>
+          <div class="year-stats-empty">${statsScope==='all' ? '아직 기록이 없어요' : '이 해에는 아직 기록이 없어요'}</div>
         </div>`;
+      bindYearToggle();
       return;
     }
 
-    const count = yearEntries.length;
-    const total = yearEntries.reduce((s,e)=> s + (Number(e.price)||0), 0);
+    const count = scopeEntries.length;
+    const total = scopeEntries.reduce((s,e)=> s + (Number(e.price)||0), 0);
 
+    // top 5 artists
     const artistCounts = {};
-    yearEntries.forEach(e=>{
-      artistCounts[e.artist] = (artistCounts[e.artist] || 0) + 1;
+    scopeEntries.forEach(e=>{ artistCounts[e.artist] = (artistCounts[e.artist]||0) + 1; });
+    const topArtists = Object.entries(artistCounts).sort((a,b)=> b[1]-a[1]).slice(0,5);
+    const maxArtistCount = topArtists.length ? topArtists[0][1] : 1;
+
+    // category breakdown
+    const catCounts = {};
+    scopeEntries.forEach(e=>{ catCounts[e.category] = (catCounts[e.category]||0) + 1; });
+    const catRows = Object.entries(catCounts).sort((a,b)=> b[1]-a[1]);
+
+    // monthly trend (only meaningful for a single year; for 'all' scope, aggregate by month regardless of year)
+    const monthCounts = new Array(12).fill(0);
+    scopeEntries.forEach(e=>{
+      const m = new Date(e.date + 'T00:00:00').getMonth();
+      monthCounts[m]++;
     });
-    let topArtist = '';
-    let topCount = 0;
-    Object.entries(artistCounts).forEach(([artist, c])=>{
-      if (c > topCount){ topArtist = artist; topCount = c; }
+    const maxMonthCount = Math.max(1, ...monthCounts);
+
+    // venues: count + total spend
+    const venueStats = {};
+    scopeEntries.forEach(e=>{
+      const v = e.venue && e.venue.trim() ? e.venue.trim() : '장소 미기록';
+      if (!venueStats[v]) venueStats[v] = { count: 0, spend: 0 };
+      venueStats[v].count++;
+      venueStats[v].spend += Number(e.price) || 0;
     });
+    const topVenues = Object.entries(venueStats).sort((a,b)=> b[1].count - a[1].count).slice(0,5);
 
     box.innerHTML = `
       <div class="year-stats-card">
-        <div class="year-stats-title">📊 ${calYear}년 모아보기</div>
+        <div class="year-stats-title" style="justify-content:space-between;">
+          <span>${titleText}</span>${toggleHTML}
+        </div>
         <div class="year-stats-grid">
           <div class="ys-item">
             <div class="ys-label">총 관람 횟수</div>
@@ -837,14 +1223,65 @@
             <div class="ys-label">총 지출</div>
             <div class="ys-value coral">${fmtMoney(total)}</div>
           </div>
-          <div class="ys-item wide">
-            <div class="ys-label">최다 관람 아티스트</div>
-            <div class="ys-value">${escapeHtml(topArtist)}</div>
-            <div class="ys-sub">${topCount}회 관람</div>
+        </div>
+
+        <div class="stats-block">
+          <div class="stats-block-title">🎤 자주 만난 아티스트 TOP ${topArtists.length}</div>
+          ${topArtists.map(([artist, c], i)=> `
+            <div class="top-artist-row">
+              <div class="top-artist-rank">${i+1}</div>
+              <div class="top-artist-name">${escapeHtml(artist)}</div>
+              <div class="top-artist-bar-wrap"><div class="top-artist-bar" style="width:${Math.round(c/maxArtistCount*100)}%"></div></div>
+              <div class="top-artist-count">${c}회</div>
+            </div>
+          `).join('')}
+        </div>
+
+        <div class="stats-block">
+          <div class="stats-block-title">🎫 공연 취향 (카테고리별)</div>
+          <table class="cat-table">
+            ${catRows.map(([cat, c])=> `<tr><td>${escapeHtml(cat)}</td><td>${c}회</td></tr>`).join('')}
+          </table>
+        </div>
+
+        <div class="stats-block">
+          <div class="stats-block-title">📈 월별 관람 흐름</div>
+          <div class="month-chart">
+            ${monthCounts.map((c, i)=> `
+              <div class="month-col">
+                ${c > 0 ? `<div class="month-count">${c}</div>` : ''}
+                <div class="month-bar" style="height:${Math.max(2, Math.round(c/maxMonthCount*60))}px"></div>
+                <div class="month-label">${i+1}월</div>
+              </div>
+            `).join('')}
           </div>
         </div>
+
+        <div class="stats-block" style="margin-bottom:10px;">
+          <div class="stats-block-title">📍 자주 간 공연장</div>
+          ${topVenues.map(([venue, v])=> `
+            <div class="venue-row">
+              <div>
+                <div class="venue-name">${escapeHtml(venue)}</div>
+                <div class="venue-sub">${v.count}회 방문</div>
+              </div>
+              <div class="venue-spend">${fmtMoney(v.spend)}</div>
+            </div>
+          `).join('')}
+        </div>
       </div>`;
+    bindYearToggle();
   }
+
+  function bindYearToggle(){
+    document.querySelectorAll('.year-toggle button').forEach(btn=>{
+      btn.addEventListener('click', ()=>{
+        statsScope = btn.dataset.scope;
+        renderYearStats();
+      });
+    });
+  }
+
 
   function renderDayEvents(eventsByDate){
     const container = $('dayEvents');
@@ -854,7 +1291,7 @@
     }
     const evs = eventsByDate ? eventsByDate[selectedDate] : entries.filter(e=>e.date===selectedDate);
     if (!evs || !evs.length){ container.innerHTML=''; return; }
-    container.innerHTML = evs.map(e=>`<div class="card-shell">${stubHTML(e,false)}</div>`).join('');
+    container.innerHTML = evs.map(e=>`<div class="card-shell">${stubHTML(e)}</div>`).join('');
   }
 
   // ---------- List ----------
@@ -866,7 +1303,7 @@
     }
     const total = entries.reduce((s,e)=> s + (Number(e.price)||0), 0);
     let html = `<div class="list-summary"><span>누적 지출</span><b>${fmtMoney(total)}</b></div>`;
-    html += entries.map(e=>`<div class="card-shell">${stubHTML(e,false)}</div>`).join('');
+    html += entries.map(e=>`<div class="card-shell">${stubHTML(e)}</div>`).join('');
     wrap.innerHTML = html;
   }
 
@@ -877,7 +1314,7 @@
   function renderAll(){
     renderHeaderCount();
     if (currentTab === 'calendar') renderCalendar();
-    else renderList();
+    else if (currentTab === 'list') renderList();
   }
 
   // ---------- Tabs ----------
@@ -910,6 +1347,7 @@
     editingId = entry ? entry.id : null;
     $('modalTitle').textContent = entry ? '기록 수정' : '새 기록';
     $('fArtist').value = entry ? entry.artist : '';
+    $('fEventName').value = entry ? (entry.eventName || '') : '';
     $('fDate').value = entry ? entry.date : (selectedDate || new Date().toISOString().slice(0,10));
     $('fPrice').value = entry ? entry.price : '';
     $('fVenue').value = entry ? entry.venue : '';
@@ -996,14 +1434,15 @@
     const dedupeKey = backlogKeyFor(entry.artist, entry.date);
     let match = backlog.find(b => backlogKeyFor(b.artist, b.date) === dedupeKey);
     if (match){
+      match.eventName = entry.eventName || match.eventName;
       match.venue = entry.venue || match.venue;
       match.category = entry.category || match.category;
-      match.count = (match.count || 1) + (entry._isNewBacklogHit ? 0 : 0);
       match.updatedAt = Date.now();
     } else {
       match = {
         id: 'b_' + Date.now() + '_' + Math.random().toString(36).slice(2,8),
         artist: entry.artist,
+        eventName: entry.eventName || '',
         date: entry.date,
         venue: entry.venue || '',
         category: entry.category || '기타',
@@ -1032,7 +1471,7 @@
     box.innerHTML = `<div class="suggest-hint">이전에 등록된 공연</div>` + matches.map(m => `
       <div class="suggest-item" data-id="${m.id}">
         <div class="s-title">${escapeHtml(m.artist)}</div>
-        <div class="s-meta">${fmtDateShort(m.date)}${m.venue ? ' · ' + escapeHtml(m.venue) : ''} · ${escapeHtml(m.category)}</div>
+        <div class="s-meta">${m.eventName ? escapeHtml(m.eventName) + ' · ' : ''}${fmtDateShort(m.date)}${m.venue ? ' · ' + escapeHtml(m.venue) : ''} · ${escapeHtml(m.category)}</div>
       </div>
     `).join('');
     box.classList.add('show');
@@ -1041,6 +1480,7 @@
         const m = backlog.find(b=>b.id===item.dataset.id);
         if (!m) return;
         $('fArtist').value = m.artist;
+        $('fEventName').value = m.eventName || '';
         $('fDate').value = m.date;
         $('fVenue').value = m.venue || '';
         selectedCat = m.category || '기타';
@@ -1064,13 +1504,15 @@
 
   $('saveBtn').addEventListener('click', async ()=>{
     const artist = $('fArtist').value.trim();
+    const eventName = $('fEventName').value.trim();
     const date = $('fDate').value;
-    if (!artist || !date){ toast('공연명과 날짜는 필수예요'); return; }
+    if (!artist || !date){ toast('아티스트와 날짜는 필수예요'); return; }
 
     const entry = {
       id: editingId || uid(),
       category: selectedCat,
       artist,
+      eventName,
       date,
       price: $('fPrice').value ? Number($('fPrice').value) : 0,
       venue: $('fVenue').value.trim(),
@@ -1144,14 +1586,10 @@
       const entry = entries.find(e=>e.id===id);
       if (!entry) return;
       toast('이미지 생성 중…');
-      const holder = $('shareCanvas');
-      holder.innerHTML = `<div style="width:420px; padding:24px; background:linear-gradient(150deg, #EAF6F3, #DCEEF8);">${stubHTML(entry, true)}</div>`;
-      holder.style.top = '0px'; holder.style.left = '0px'; holder.style.zIndex = '-1'; holder.style.opacity='0';
-      await new Promise(r=>setTimeout(r, 150));
       try {
-        const canvas = await html2canvas(holder.firstChild, { backgroundColor: '#EAF6F3', scale: 2 });
-        holder.innerHTML = '';
+        const canvas = await buildStubCanvas(entry);
         canvas.toBlob(async (blob)=>{
+          if (!blob){ toast('이미지 생성에 실패했어요'); return; }
           const file = new File([blob], `stub_${entry.artist}.png`, { type: 'image/png' });
           if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })){
             try {
@@ -1168,7 +1606,7 @@
           toast('이미지를 저장했어요');
         }, 'image/png');
       } catch(e){
-        holder.innerHTML = '';
+        console.error('Share image build failed:', e);
         toast('공유 이미지 생성에 실패했어요');
       }
     }
@@ -1179,9 +1617,6 @@
     const now = new Date();
     calYear = now.getFullYear();
     calMonth = now.getMonth();
-    if (window.__storageIsLocalFallback){
-      $('localFallbackNotice').style.display = 'block';
-    }
     await loadEntries();
     await loadBacklog();
     renderAll();
