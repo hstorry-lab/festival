@@ -569,9 +569,10 @@
       </div>
     </div>
 
-    <div class="field">
+    <div class="field" style="position:relative;">
       <label>장소</label>
-      <input type="text" id="fVenue" placeholder="예) 고척스카이돔">
+      <input type="text" id="fVenue" placeholder="예) 고척스카이돔" autocomplete="off">
+      <div id="venueSuggest" class="suggest-dropdown"></div>
     </div>
 
     <div class="field">
@@ -1376,6 +1377,7 @@
     selectedCat = entry ? entry.category : '콘서트';
     updateCatPicker();
     $('artistSuggest').classList.remove('show');
+    $('venueSuggest').classList.remove('show');
     $('saveError').textContent = '';
     $('modalBg').classList.add('open');
   }
@@ -1471,42 +1473,119 @@
     } catch(e){ /* ignore, non-critical */ }
   }
 
-  function renderSuggestions(query){
+  // Builds a deduped, individually-searchable list of artist names from the backlog,
+  // splitting any comma-separated lineups (e.g. "아이유, 세븐틴") into separate entries.
+  function collectKnownArtists(){
+    const byName = {};
+    backlog.forEach(b=>{
+      splitArtists(b.artist).forEach(name=>{
+        const key = name.toLowerCase();
+        if (!byName[key] || new Date(b.date) > new Date(byName[key].date)){
+          byName[key] = { name, date: b.date };
+        }
+      });
+    });
+    return Object.values(byName);
+  }
+
+  // Returns { before, current } — text before the artist currently being typed
+  // (everything up to the last comma) and the segment currently being typed.
+  function splitCurrentSegment(value){
+    const idx = value.lastIndexOf(',');
+    if (idx === -1) return { before: '', current: value };
+    return { before: value.slice(0, idx+1) + ' ', current: value.slice(idx+1) };
+  }
+
+  function renderSuggestions(rawValue){
     const box = $('artistSuggest');
-    const q = query.trim().toLowerCase();
+    const { current } = splitCurrentSegment(rawValue);
+    const q = current.trim().toLowerCase();
     if (!q){ box.classList.remove('show'); box.innerHTML=''; return; }
-    const matches = backlog
-      .filter(b => b.artist.toLowerCase().includes(q))
+
+    const matches = collectKnownArtists()
+      .filter(a => a.name.toLowerCase().includes(q))
       .sort((a,b)=> new Date(b.date) - new Date(a.date))
       .slice(0, 6);
     if (!matches.length){ box.classList.remove('show'); box.innerHTML=''; return; }
-    box.innerHTML = `<div class="suggest-hint">이전에 등록된 공연</div>` + matches.map(m => `
-      <div class="suggest-item" data-id="${m.id}">
-        <div class="s-title">${escapeHtml(m.artist)}</div>
-        <div class="s-meta">${m.eventName ? escapeHtml(m.eventName) + ' · ' : ''}${fmtDateShort(m.date)}${m.venue ? ' · ' + escapeHtml(m.venue) : ''} · ${escapeHtml(m.category)}</div>
+
+    box.innerHTML = `<div class="suggest-hint">이전에 등록한 아티스트</div>` + matches.map(m => `
+      <div class="suggest-item" data-name="${escapeAttr(m.name)}">
+        <div class="s-title">${escapeHtml(m.name)}</div>
       </div>
     `).join('');
     box.classList.add('show');
     box.querySelectorAll('.suggest-item').forEach(item=>{
       item.addEventListener('click', ()=>{
-        const m = backlog.find(b=>b.id===item.dataset.id);
-        if (!m) return;
-        $('fArtist').value = m.artist;
-        $('fEventName').value = m.eventName || '';
-        $('fDate').value = m.date;
-        $('fVenue').value = m.venue || '';
-        selectedCat = m.category || '기타';
-        updateCatPicker();
+        const { before } = splitCurrentSegment($('fArtist').value);
+        $('fArtist').value = before + item.dataset.name;
+        $('fArtist').focus();
         box.classList.remove('show');
       });
     });
   }
 
   $('fArtist').addEventListener('input', (e)=> renderSuggestions(e.target.value));
-  $('fArtist').addEventListener('focus', (e)=> { if (e.target.value.trim()) renderSuggestions(e.target.value); });
+  $('fArtist').addEventListener('focus', (e)=> { if (splitCurrentSegment(e.target.value).current.trim()) renderSuggestions(e.target.value); });
   document.addEventListener('click', (e)=>{
     if (!e.target.closest('.field') || !e.target.closest('#artistSuggest') && e.target.id !== 'fArtist'){
       if (e.target.id !== 'fArtist') $('artistSuggest').classList.remove('show');
+    }
+  });
+
+  // ---------- Venue autocomplete ----------
+  function collectKnownVenues(){
+    const byName = {};
+    backlog.forEach(b=>{
+      const v = (b.venue || '').trim();
+      if (!v) return;
+      const key = v.toLowerCase();
+      if (!byName[key] || new Date(b.date) > new Date(byName[key].date)){
+        byName[key] = { name: v, date: b.date };
+      }
+    });
+    // also include venues from the person's own past entries, in case backlog is thin
+    entries.forEach(e=>{
+      const v = (e.venue || '').trim();
+      if (!v) return;
+      const key = v.toLowerCase();
+      if (!byName[key] || new Date(e.date) > new Date(byName[key].date)){
+        byName[key] = { name: v, date: e.date };
+      }
+    });
+    return Object.values(byName);
+  }
+
+  function renderVenueSuggestions(rawValue){
+    const box = $('venueSuggest');
+    const q = rawValue.trim().toLowerCase();
+    if (!q){ box.classList.remove('show'); box.innerHTML=''; return; }
+
+    const matches = collectKnownVenues()
+      .filter(v => v.name.toLowerCase().includes(q))
+      .sort((a,b)=> new Date(b.date) - new Date(a.date))
+      .slice(0, 6);
+    if (!matches.length){ box.classList.remove('show'); box.innerHTML=''; return; }
+
+    box.innerHTML = `<div class="suggest-hint">이전에 등록한 장소</div>` + matches.map(v => `
+      <div class="suggest-item" data-name="${escapeAttr(v.name)}">
+        <div class="s-title">${escapeHtml(v.name)}</div>
+      </div>
+    `).join('');
+    box.classList.add('show');
+    box.querySelectorAll('.suggest-item').forEach(item=>{
+      item.addEventListener('click', ()=>{
+        $('fVenue').value = item.dataset.name;
+        $('fVenue').focus();
+        box.classList.remove('show');
+      });
+    });
+  }
+
+  $('fVenue').addEventListener('input', (e)=> renderVenueSuggestions(e.target.value));
+  $('fVenue').addEventListener('focus', (e)=> { if (e.target.value.trim()) renderVenueSuggestions(e.target.value); });
+  document.addEventListener('click', (e)=>{
+    if (!e.target.closest('.field') || !e.target.closest('#venueSuggest') && e.target.id !== 'fVenue'){
+      if (e.target.id !== 'fVenue') $('venueSuggest').classList.remove('show');
     }
   });
 
