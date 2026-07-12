@@ -446,6 +446,9 @@
       <div class="tab active" data-tab="calendar">캘린더</div>
       <div class="tab" data-tab="list">전체 기록</div>
     </div>
+    <div id="localFallbackNotice" style="display:none; margin-top:12px; padding:8px 12px; background:rgba(255,158,128,0.15); border:1px solid rgba(232,115,74,0.3); border-radius:10px; font-size:11px; font-weight:700; color:#E8734A; line-height:1.5;">
+      ⚠️ 이 기기에만 저장돼요. 다른 사람과 공유되지 않아요.
+    </div>
   </header>
 
   <div id="calendarView">
@@ -525,6 +528,8 @@
       <textarea id="fMemo" placeholder="셋리스트, 좌석, 느낀 점 등"></textarea>
     </div>
 
+    <div id="saveError" style="font-size:11px; font-weight:700; color:#E8734A; margin-bottom:8px; word-break:break-all; line-height:1.5;"></div>
+
     <div class="modal-actions">
       <button class="btn-cancel" id="cancelBtn">취소</button>
       <button class="btn-save" id="saveBtn">저장</button>
@@ -539,6 +544,48 @@
 
 <script>
 (function(){
+  // ---------- Storage adapter ----------
+  // window.storage (shared, cross-device) only exists inside Claude.ai's artifact
+  // preview. When this file is hosted elsewhere (Vercel, downloaded + opened, etc.)
+  // that API doesn't exist, and every save would silently/loudly fail. Fall back to
+  // localStorage in that case so saving always works — just per-device instead of shared.
+  const hasNativeStorage = typeof window.storage === 'object' && window.storage !== null
+    && typeof window.storage.get === 'function' && typeof window.storage.set === 'function';
+
+  const LOCAL_NS = 'stubs_local_v1:';
+  const localBackend = {
+    isNative: false,
+    async get(key){
+      try {
+        const raw = localStorage.getItem(LOCAL_NS + key);
+        if (raw === null) return null;
+        return { key, value: raw, shared: false };
+      } catch(e){ console.error('localStorage get failed:', e); return null; }
+    },
+    async set(key, value){
+      try {
+        localStorage.setItem(LOCAL_NS + key, value);
+        return { key, value, shared: false };
+      } catch(e){ console.error('localStorage set failed:', e); return null; }
+    },
+    async delete(key){
+      try {
+        localStorage.removeItem(LOCAL_NS + key);
+        return { key, deleted: true, shared: false };
+      } catch(e){ console.error('localStorage delete failed:', e); return null; }
+    }
+  };
+
+  const nativeBackend = hasNativeStorage ? {
+    isNative: true,
+    async get(key, shared){ return window.storage.get(key, shared !== false); },
+    async set(key, value, shared){ return window.storage.set(key, value, shared !== false); },
+    async delete(key, shared){ return window.storage.delete(key, shared !== false); }
+  } : null;
+
+  const Store = hasNativeStorage ? nativeBackend : localBackend;
+  window.__storageIsLocalFallback = !hasNativeStorage;
+
   const STORAGE_KEY_PREFIX = 'stub_entry:';
   const LIST_KEY = 'stub_entry_ids';
   let entries = [];
@@ -611,12 +658,12 @@
   // ---------- Storage (shared) ----------
   async function loadEntries(){
     try {
-      const idxRes = await window.storage.get(LIST_KEY, true);
+      const idxRes = await Store.get(LIST_KEY, true);
       const ids = idxRes ? JSON.parse(idxRes.value) : [];
       const loaded = [];
       for (const id of ids){
         try {
-          const r = await window.storage.get(STORAGE_KEY_PREFIX + id, true);
+          const r = await Store.get(STORAGE_KEY_PREFIX + id, true);
           if (r) loaded.push(JSON.parse(r.value));
         } catch(e){ /* missing key, skip */ }
       }
@@ -629,15 +676,17 @@
   async function saveIndex(extraId){
     const ids = entries.map(e=>e.id);
     if (extraId && !ids.includes(extraId)) ids.push(extraId);
-    await window.storage.set(LIST_KEY, JSON.stringify(ids), true);
+    const result = await Store.set(LIST_KEY, JSON.stringify(ids), true);
+    if (!result) throw new Error('목록 저장 실패 (storage.set이 빈 값을 반환함)');
   }
 
   async function saveEntry(entry){
-    await window.storage.set(STORAGE_KEY_PREFIX + entry.id, JSON.stringify(entry), true);
+    const result = await Store.set(STORAGE_KEY_PREFIX + entry.id, JSON.stringify(entry), true);
+    if (!result) throw new Error('기록 저장 실패 (storage.set이 빈 값을 반환함, 사진 용량이 원인일 수 있어요)');
   }
 
   async function deleteEntryStorage(id){
-    try { await window.storage.delete(STORAGE_KEY_PREFIX + id, true); } catch(e){}
+    try { await Store.delete(STORAGE_KEY_PREFIX + id, true); } catch(e){}
   }
 
   // ---------- Rendering ----------
@@ -877,6 +926,7 @@
     selectedCat = entry ? entry.category : '콘서트';
     updateCatPicker();
     $('artistSuggest').classList.remove('show');
+    $('saveError').textContent = '';
     $('modalBg').classList.add('open');
   }
   function closeModal(){
@@ -928,12 +978,12 @@
 
   async function loadBacklog(){
     try {
-      const idxRes = await window.storage.get(BACKLOG_LIST_KEY, true);
+      const idxRes = await Store.get(BACKLOG_LIST_KEY, true);
       const ids = idxRes ? JSON.parse(idxRes.value) : [];
       const loaded = [];
       for (const id of ids){
         try {
-          const r = await window.storage.get(BACKLOG_KEY_PREFIX + id, true);
+          const r = await Store.get(BACKLOG_KEY_PREFIX + id, true);
           if (r) loaded.push(JSON.parse(r.value));
         } catch(e){ /* skip missing */ }
       }
@@ -962,11 +1012,11 @@
       backlog.push(match);
       try {
         const ids = backlog.map(b=>b.id);
-        await window.storage.set(BACKLOG_LIST_KEY, JSON.stringify(ids), true);
+        await Store.set(BACKLOG_LIST_KEY, JSON.stringify(ids), true);
       } catch(e){ /* ignore */ }
     }
     try {
-      await window.storage.set(BACKLOG_KEY_PREFIX + match.id, JSON.stringify(match), true);
+      await Store.set(BACKLOG_KEY_PREFIX + match.id, JSON.stringify(match), true);
     } catch(e){ /* ignore, non-critical */ }
   }
 
@@ -1031,14 +1081,26 @@
 
     $('saveBtn').disabled = true;
     $('saveBtn').textContent = '저장 중…';
+    $('saveError').textContent = '';
+
+    async function persist(){
+      await saveEntry(entry);
+      await saveIndex(entry.id);
+      try { await upsertBacklog(entry); } catch(e){ console.error('Backlog upsert failed (non-critical):', e); }
+    }
 
     // Save to persistent storage FIRST. Only touch the in-memory list (and thus the UI)
     // once the save actually succeeds — otherwise an entry can look "saved" and then
     // vanish on refresh because it was never really persisted.
     try {
-      await saveEntry(entry);
-      await saveIndex(entry.id);
-      await upsertBacklog(entry);
+      try {
+        await persist();
+      } catch(firstErr){
+        console.error('Save failed, retrying once:', firstErr);
+        $('saveBtn').textContent = '재시도 중…';
+        await new Promise(r => setTimeout(r, 800));
+        await persist();
+      }
 
       if (editingId){
         const idx = entries.findIndex(e=>e.id===editingId);
@@ -1052,7 +1114,10 @@
       closeModal();
       renderAll();
     } catch(e){
-      toast('저장에 실패했어요. 다시 시도해주세요.');
+      console.error('Save failed after retry:', e);
+      const msg = (e && (e.message || e.toString())) || '알 수 없는 오류';
+      $('saveError').textContent = `❌ 저장 실패: ${msg}`;
+      toast('저장에 실패했어요');
     } finally {
       $('saveBtn').disabled = false;
       $('saveBtn').textContent = '저장';
@@ -1114,6 +1179,9 @@
     const now = new Date();
     calYear = now.getFullYear();
     calMonth = now.getMonth();
+    if (window.__storageIsLocalFallback){
+      $('localFallbackNotice').style.display = 'block';
+    }
     await loadEntries();
     await loadBacklog();
     renderAll();
