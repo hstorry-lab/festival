@@ -119,6 +119,53 @@
 
   .day-events { padding: 4px 20px 10px; display: flex; flex-direction: column; gap: 10px; }
 
+  /* ---------- Year stats (모아보기) ---------- */
+  .year-stats { padding: 6px 20px 20px; }
+  .year-stats-card {
+    background: linear-gradient(150deg, rgba(143,199,242,0.16), rgba(127,216,208,0.16));
+    border: 1.5px solid rgba(127,216,208,0.35);
+    border-radius: 18px;
+    padding: 16px 16px 8px;
+  }
+  .year-stats-title {
+    font-family: 'Baloo 2', sans-serif;
+    font-size: 14px; font-weight: 600;
+    color: #1B3B39;
+    margin-bottom: 12px;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .year-stats-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+  }
+  .ys-item {
+    background: rgba(255,255,255,0.55);
+    border-radius: 12px;
+    padding: 12px 12px 10px;
+  }
+  .ys-item.wide { grid-column: 1 / -1; }
+  .ys-label {
+    font-size: 10px; font-weight: 800; letter-spacing: 0.2px;
+    color: rgba(43,76,74,0.5);
+    margin-bottom: 4px;
+  }
+  .ys-value {
+    font-family: 'Baloo 2', sans-serif;
+    font-size: 19px; font-weight: 700;
+    color: #2B8A7E;
+    line-height: 1.2;
+  }
+  .ys-value small { font-size: 12px; font-weight: 700; color: rgba(43,76,74,0.55); }
+  .ys-value.coral { color: #E8734A; }
+  .ys-sub { font-size: 11px; font-weight: 600; color: rgba(43,76,74,0.5); margin-top: 2px; }
+  .year-stats-empty {
+    text-align: center;
+    padding: 18px 10px;
+    font-size: 12px; font-weight: 600;
+    color: rgba(43,76,74,0.45);
+  }
+
   /* ---------- List ---------- */
   .list-wrap { padding: 16px 20px; display: flex; flex-direction: column; gap: 14px; }
   .list-summary {
@@ -412,6 +459,8 @@
       <div class="cal-grid" id="calGrid"></div>
     </div>
     <div class="day-events" id="dayEvents"></div>
+
+    <div class="year-stats" id="yearStats"></div>
   </div>
 
   <div id="listView" style="display:none;">
@@ -463,7 +512,7 @@
 
     <div class="field">
       <label>현장 사진 (선택)</label>
-      <input type="file" id="fPhotoFile" accept="image/*" capture="environment">
+      <input type="file" id="fPhotoFile" accept="image/*">
       <div id="photoPreviewWrap" style="display:none; margin-top:10px; position:relative;">
         <img id="photoPreview" style="width:100%; border-radius:8px; max-height:180px; object-fit:cover;">
         <button type="button" id="removePhoto" style="position:absolute; top:6px; right:6px; background:rgba(26,26,26,0.75); color:#F5F0E8; border:none; width:26px; height:26px; border-radius:50%; font-size:13px; cursor:pointer;">✕</button>
@@ -539,6 +588,26 @@
     });
   }
 
+  // Keeps shrinking dimension/quality until the result fits under maxChars (base64 length),
+  // so even very large original photos always end up small enough to store.
+  async function compressImageToLimit(file, maxChars){
+    const steps = [
+      { dim: 1280, q: 0.8 },
+      { dim: 1100, q: 0.7 },
+      { dim: 900,  q: 0.65 },
+      { dim: 750,  q: 0.6 },
+      { dim: 600,  q: 0.5 },
+      { dim: 480,  q: 0.45 },
+      { dim: 360,  q: 0.4 }
+    ];
+    let result = null;
+    for (const step of steps){
+      result = await resizeImageFile(file, step.dim, step.q);
+      if (result.length <= maxChars) return result;
+    }
+    return result; // smallest attempted, best effort
+  }
+
   // ---------- Storage (shared) ----------
   async function loadEntries(){
     try {
@@ -557,8 +626,9 @@
     }
   }
 
-  async function saveIndex(){
+  async function saveIndex(extraId){
     const ids = entries.map(e=>e.id);
+    if (extraId && !ids.includes(extraId)) ids.push(extraId);
     await window.storage.set(LIST_KEY, JSON.stringify(ids), true);
   }
 
@@ -677,6 +747,54 @@
     });
 
     renderDayEvents(eventsByDate);
+    renderYearStats();
+  }
+
+  function renderYearStats(){
+    const box = $('yearStats');
+    const yearEntries = entries.filter(e => new Date(e.date + 'T00:00:00').getFullYear() === calYear);
+
+    if (!yearEntries.length){
+      box.innerHTML = `
+        <div class="year-stats-card">
+          <div class="year-stats-title">📊 ${calYear}년 모아보기</div>
+          <div class="year-stats-empty">이 해에는 아직 기록이 없어요</div>
+        </div>`;
+      return;
+    }
+
+    const count = yearEntries.length;
+    const total = yearEntries.reduce((s,e)=> s + (Number(e.price)||0), 0);
+
+    const artistCounts = {};
+    yearEntries.forEach(e=>{
+      artistCounts[e.artist] = (artistCounts[e.artist] || 0) + 1;
+    });
+    let topArtist = '';
+    let topCount = 0;
+    Object.entries(artistCounts).forEach(([artist, c])=>{
+      if (c > topCount){ topArtist = artist; topCount = c; }
+    });
+
+    box.innerHTML = `
+      <div class="year-stats-card">
+        <div class="year-stats-title">📊 ${calYear}년 모아보기</div>
+        <div class="year-stats-grid">
+          <div class="ys-item">
+            <div class="ys-label">총 관람 횟수</div>
+            <div class="ys-value">${count}<small> 회</small></div>
+          </div>
+          <div class="ys-item">
+            <div class="ys-label">총 지출</div>
+            <div class="ys-value coral">${fmtMoney(total)}</div>
+          </div>
+          <div class="ys-item wide">
+            <div class="ys-label">최다 관람 아티스트</div>
+            <div class="ys-value">${escapeHtml(topArtist)}</div>
+            <div class="ys-sub">${topCount}회 관람</div>
+          </div>
+        </div>
+      </div>`;
   }
 
   function renderDayEvents(eventsByDate){
@@ -779,10 +897,8 @@
     if (!file) return;
     $('photoStatus').textContent = '사진 처리 중…';
     try {
-      let dataUrl = await resizeImageFile(file, 1280, 0.8);
-      if (dataUrl.length > 1400000){
-        dataUrl = await resizeImageFile(file, 900, 0.7);
-      }
+      // target well under the 5MB per-key storage limit, leaving room for other fields
+      const dataUrl = await compressImageToLimit(file, 1500000);
       currentPhotoData = dataUrl;
       $('photoPreview').src = dataUrl;
       $('photoPreviewWrap').style.display = 'block';
@@ -913,25 +1029,34 @@
       createdAt: editingId ? (entries.find(e=>e.id===editingId)?.createdAt || Date.now()) : Date.now()
     };
 
-    if (editingId){
-      const idx = entries.findIndex(e=>e.id===editingId);
-      if (idx>-1) entries[idx] = entry;
-    } else {
-      entries.push(entry);
-    }
-    entries.sort((a,b)=> new Date(b.date) - new Date(a.date));
+    $('saveBtn').disabled = true;
+    $('saveBtn').textContent = '저장 중…';
 
+    // Save to persistent storage FIRST. Only touch the in-memory list (and thus the UI)
+    // once the save actually succeeds — otherwise an entry can look "saved" and then
+    // vanish on refresh because it was never really persisted.
     try {
       await saveEntry(entry);
-      await saveIndex();
+      await saveIndex(entry.id);
       await upsertBacklog(entry);
-      toast(editingId ? '수정했어요' : '기록했어요 🎫');
-    } catch(e){
-      toast('저장에 실패했어요. 사진 용량이 너무 클 수 있어요.');
-    }
 
-    closeModal();
-    renderAll();
+      if (editingId){
+        const idx = entries.findIndex(e=>e.id===editingId);
+        if (idx>-1) entries[idx] = entry; else entries.push(entry);
+      } else {
+        entries.push(entry);
+      }
+      entries.sort((a,b)=> new Date(b.date) - new Date(a.date));
+
+      toast(editingId ? '수정했어요' : '기록했어요 🎫');
+      closeModal();
+      renderAll();
+    } catch(e){
+      toast('저장에 실패했어요. 다시 시도해주세요.');
+    } finally {
+      $('saveBtn').disabled = false;
+      $('saveBtn').textContent = '저장';
+    }
   });
 
   // ---------- Edit / Delete / Share (exposed) ----------
