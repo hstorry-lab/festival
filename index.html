@@ -229,6 +229,19 @@
   .venue-spend { font-size: 12px; font-weight: 800; color: #E8734A; text-align: right; }
   /* ---------- List ---------- */
   .list-wrap { padding: 16px 20px; display: flex; flex-direction: column; gap: 14px; }
+
+  .backup-row { display: flex; gap: 8px; padding: 16px 20px 0; }
+  .backup-row button {
+    flex: 1;
+    background: rgba(255,255,255,0.5);
+    border: 1.5px solid rgba(43,76,74,0.15);
+    color: #2B4C4A;
+    padding: 10px 0;
+    border-radius: 12px;
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+  }
   .list-summary {
     display: flex; justify-content: space-between; align-items: center;
     padding: 14px 16px;
@@ -523,6 +536,11 @@
   </div>
 
   <div id="listView" style="display:none;">
+    <div class="backup-row">
+      <button id="exportBtn">⬇ 백업 내보내기</button>
+      <button id="importBtn">⬆ 백업 불러오기</button>
+      <input type="file" id="importFile" accept="application/json" style="display:none;">
+    </div>
     <div class="list-wrap" id="listWrap"></div>
   </div>
 
@@ -1427,6 +1445,80 @@
     html += entries.map(e=>`<div class="card-shell">${stubHTML(e)}</div>`).join('');
     wrap.innerHTML = html;
   }
+
+  // ---------- Backup: export / import ----------
+  function exportBackup(){
+    const payload = {
+      app: 'stubs',
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      entries
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    const dateStr = new Date().toISOString().slice(0,10);
+    a.href = url;
+    a.download = `stubs_backup_${dateStr}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    toast(`백업 파일을 내려받았어요 (${entries.length}개)`);
+  }
+
+  async function importBackupFile(file){
+    const text = await file.text();
+    let payload;
+    try { payload = JSON.parse(text); }
+    catch(e){ throw new Error('올바른 백업 파일이 아니에요'); }
+
+    const importedEntries = Array.isArray(payload) ? payload : payload.entries;
+    if (!Array.isArray(importedEntries)) throw new Error('백업 파일 형식이 올바르지 않아요');
+
+    let addedCount = 0, skippedCount = 0;
+    for (const imp of importedEntries){
+      if (!imp || !imp.id || !imp.artist || !imp.date){ skippedCount++; continue; }
+      if (entries.some(e => e.id === imp.id)){ skippedCount++; continue; } // already have this one
+      try {
+        await saveEntry(imp);
+        entries.push(imp);
+        addedCount++;
+      } catch(e){ skippedCount++; }
+    }
+    if (addedCount > 0){
+      await saveIndex();
+      entries.sort((a,b)=> new Date(b.date) - new Date(a.date));
+    }
+    return { addedCount, skippedCount, total: importedEntries.length };
+  }
+
+  $('exportBtn').addEventListener('click', ()=>{
+    if (!entries.length){ toast('내보낼 기록이 없어요'); return; }
+    exportBackup();
+  });
+
+  $('importBtn').addEventListener('click', ()=> $('importFile').click());
+
+  $('importFile').addEventListener('change', async (e)=>{
+    const file = e.target.files[0];
+    if (!file) return;
+    toast('불러오는 중…');
+    try {
+      const result = await importBackupFile(file);
+      renderAll();
+      if (result.addedCount === 0 && result.skippedCount > 0){
+        toast('이미 다 가지고 있는 기록이에요');
+      } else {
+        toast(`${result.addedCount}개 불러왔어요${result.skippedCount ? ` (중복/오류 ${result.skippedCount}개 건너뜀)` : ''}`);
+      }
+    } catch(err){
+      console.error('Import failed:', err);
+      toast(`❌ ${err.message || '불러오기에 실패했어요'}`);
+    } finally {
+      $('importFile').value = '';
+    }
+  });
 
   function renderHeaderCount(){
     $('headerCount').textContent = `${entries.length}개의 기록`;
