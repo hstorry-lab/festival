@@ -7,6 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@500;600;700;800&family=Nunito:ital,wght@0,400;0,600;0,700;0,800;1,600&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
   html, body {
@@ -44,12 +45,23 @@
     white-space: nowrap;
   }
   .brand h1 span { color: #FF9E80; }
+  .header-right { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
   .brand .count {
     font-size: 11px;
     flex-shrink: 0;
     font-weight: 700;
     color: rgba(43,76,74,0.45);
     letter-spacing: 0.3px;
+  }
+  .me-chip {
+    font-size: 11px;
+    font-weight: 800;
+    color: #2B8A7E;
+    background: rgba(127,216,208,0.18);
+    border: none;
+    padding: 5px 10px;
+    border-radius: 12px;
+    cursor: pointer;
   }
   .tabs { display: flex; gap: 8px; margin-top: 16px; }
   .tab {
@@ -512,7 +524,10 @@
   <header>
     <div class="brand">
       <h1>나락도 <span>락</span>이다</h1>
-      <div class="count" id="headerCount">0개의 기록</div>
+      <div class="header-right">
+        <div class="count" id="headerCount">0개의 기록</div>
+        <button class="me-chip" id="meChip" title="로그아웃">👤 <span id="meNickname">나</span></button>
+      </div>
     </div>
     <div class="tabs">
       <div class="tab active" data-tab="calendar">캘린더</div>
@@ -547,6 +562,28 @@
 </div>
 
 <div class="fab"><button id="openAdd">+ 기록 추가</button></div>
+
+<!-- Email + password auth (Supabase Auth) -->
+<div class="modal-bg open" id="authBg" style="z-index:70;">
+  <div class="modal">
+    <h3 id="authTitle">👋 로그인</h3>
+    <div class="hint" style="margin-top:-10px; margin-bottom:16px;">이메일과 비밀번호로 로그인하면 내 기록이 클라우드에 저장돼요. 다른 기기에서 같은 계정으로 로그인하면 자동으로 동기화돼요.</div>
+    <div class="field">
+      <label>이메일</label>
+      <input type="email" id="authEmail" placeholder="예) me@example.com" autocomplete="username">
+    </div>
+    <div class="field">
+      <label>비밀번호</label>
+      <input type="password" id="authPassword" placeholder="6자 이상" autocomplete="current-password">
+    </div>
+    <div id="authError" style="font-size:11px; font-weight:700; color:#E8734A; margin-bottom:8px;"></div>
+    <div id="authInfo" style="font-size:11px; font-weight:700; color:#2B8A7E; margin-bottom:8px;"></div>
+    <div class="modal-actions">
+      <button class="btn-cancel" id="authSignupBtn" style="width:100%;">회원가입</button>
+      <button class="btn-save" id="authLoginBtn" style="width:100%;">로그인</button>
+    </div>
+  </div>
+</div>
 
 <!-- Add/Edit Modal -->
 <div class="modal-bg" id="modalBg">
@@ -780,6 +817,45 @@
   let currentPhotoData = ''; // base64 data URL currently attached to the form
   let statsScope = 'year'; // 'year' | 'all'
 
+  // ---------- Supabase (cross-device sync via email login) ----------
+  const SUPABASE_URL = 'https://tvhfjpqrpgdluclcfnda.supabase.co';
+  const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InR2aGZqcHFycGdkbHVjbGNmbmRhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODU0ODg4NjYsImV4cCI6MjEwMTA2NDg2Nn0.FJfvvFXKrQyrfrzbgkO0vowAUYEdTVSp_IExJJk3xJo';
+  const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+  let myUserId = null;   // Supabase auth user's UUID — used to scope entries
+  let myEmail = null;    // for display in the header chip
+
+  // Map between our in-app entry shape (camelCase) and the Supabase table columns (snake_case)
+  function entryToRow(entry, userId){
+    return {
+      id: entry.id,
+      user_nickname: userId, // column name kept as-is; now holds the auth user's UUID
+      category: entry.category || null,
+      artist: entry.artist || null,
+      event_name: entry.eventName || null,
+      date: entry.date || null,
+      price: entry.price != null ? Number(entry.price) : 0,
+      venue: entry.venue || null,
+      photo: entry.photo || null,
+      memo: entry.memo || null,
+      created_at: entry.createdAt || Date.now()
+    };
+  }
+  function rowToEntry(row){
+    return {
+      id: row.id,
+      category: row.category || '',
+      artist: row.artist || '',
+      eventName: row.event_name || '',
+      date: row.date || '',
+      price: row.price != null ? Number(row.price) : 0,
+      venue: row.venue || '',
+      photo: row.photo || '',
+      memo: row.memo || '',
+      createdAt: row.created_at || Date.now()
+    };
+  }
+
   const $ = (id) => document.getElementById(id);
 
   function toast(msg){
@@ -842,8 +918,48 @@
     return result; // smallest attempted, best effort
   }
 
-  // ---------- Storage (shared) ----------
+  // ---------- Storage (Supabase, scoped by logged-in user — syncs across devices) ----------
   async function loadEntries(){
+    if (!myUserId){ entries = []; return; }
+    try {
+      const { data, error } = await sb
+        .from('entries')
+        .select('*')
+        .eq('user_nickname', myUserId)
+        .order('date', { ascending: false });
+      if (error) throw error;
+      entries = (data || []).map(rowToEntry);
+    } catch(e){
+      console.error('loadEntries (Supabase) failed:', e);
+      entries = [];
+      throw e;
+    }
+  }
+
+  // Kept as a no-op for backward compatibility with call sites — Supabase queries
+  // directly by user id, so there's no separate id-list index to maintain.
+  async function saveIndex(){ /* no-op with Supabase backend */ }
+
+  async function saveEntry(entry){
+    const row = entryToRow(entry, myUserId);
+    const { error } = await sb.from('entries').upsert(row, { onConflict: 'id' });
+    if (error){
+      console.error('saveEntry (Supabase) failed:', error);
+      throw new Error(error.message || '기록 저장에 실패했어요');
+    }
+  }
+
+  async function deleteEntryStorage(id){
+    try {
+      const { error } = await sb.from('entries').delete().eq('id', id).eq('user_nickname', myUserId);
+      if (error) console.error('deleteEntryStorage (Supabase) failed:', error);
+    } catch(e){ console.error('deleteEntryStorage (Supabase) failed:', e); }
+  }
+
+  // One-time migration: anything already saved locally (Store: native/IndexedDB/
+  // localStorage, from before Supabase sync was added) gets uploaded to this
+  // nickname's Supabase rows, so switching to sync doesn't lose existing records.
+  async function loadLegacyLocalEntries(){
     try {
       const idxRes = await Store.get(LIST_KEY, true);
       const ids = idxRes ? JSON.parse(idxRes.value) : [];
@@ -852,28 +968,24 @@
         try {
           const r = await Store.get(STORAGE_KEY_PREFIX + id, true);
           if (r) loaded.push(JSON.parse(r.value));
-        } catch(e){ /* missing key, skip */ }
+        } catch(e){ /* skip missing */ }
       }
-      entries = loaded.sort((a,b)=> new Date(b.date) - new Date(a.date));
-    } catch(e){
-      entries = [];
+      return loaded;
+    } catch(e){ return []; }
+  }
+
+  async function migrateLegacyLocalIntoSupabase(userId){
+    const legacy = await loadLegacyLocalEntries();
+    if (!legacy.length) return 0;
+    let migrated = 0;
+    for (const entry of legacy){
+      try {
+        const row = entryToRow(entry, userId);
+        const { error } = await sb.from('entries').upsert(row, { onConflict: 'id' });
+        if (!error) migrated++;
+      } catch(e){ console.error('Migration of one entry failed:', e); }
     }
-  }
-
-  async function saveIndex(extraId){
-    const ids = entries.map(e=>e.id);
-    if (extraId && !ids.includes(extraId)) ids.push(extraId);
-    const result = await Store.set(LIST_KEY, JSON.stringify(ids), true);
-    if (!result) throw new Error(window.__lastStorageError || '목록 저장에 실패했어요');
-  }
-
-  async function saveEntry(entry){
-    const result = await Store.set(STORAGE_KEY_PREFIX + entry.id, JSON.stringify(entry), true);
-    if (!result) throw new Error(window.__lastStorageError || '기록 저장에 실패했어요');
-  }
-
-  async function deleteEntryStorage(id){
-    try { await Store.delete(STORAGE_KEY_PREFIX + id, true); } catch(e){}
+    return migrated;
   }
 
   // ---------- Rendering ----------
@@ -1913,12 +2025,110 @@
     const now = new Date();
     calYear = now.getFullYear();
     calMonth = now.getMonth();
-    await loadEntries();
+
+    $('loadingScreen').style.display = 'none';
+
+    // supabase-js persists the session in the browser automatically —
+    // if one exists already, log straight back in without asking again.
+    try {
+      const { data: { session } } = await sb.auth.getSession();
+      if (session && session.user){
+        myUserId = session.user.id;
+        myEmail = session.user.email;
+        await startApp();
+        return;
+      }
+    } catch(e){ console.error('Session check failed:', e); }
+
+    $('authBg').classList.add('open');
+    $('authEmail').focus();
+  }
+
+  async function startApp(){
+    $('authBg').classList.remove('open');
+    $('meNickname').textContent = myEmail || '나';
+    try {
+      await loadEntries();
+    } catch(e){
+      toast('❌ 클라우드 연결에 실패했어요. 새로고침해서 다시 시도해주세요.');
+    }
     await loadBacklog();
     renderAll();
-    $('loadingScreen').style.display = 'none';
     $('app').style.display = 'block';
   }
+
+  function validateAuthInputs(){
+    const email = $('authEmail').value.trim();
+    const password = $('authPassword').value;
+    $('authError').textContent = '';
+    $('authInfo').textContent = '';
+    if (!email){ $('authError').textContent = '이메일을 입력해주세요'; return null; }
+    if (!password || password.length < 6){ $('authError').textContent = '비밀번호는 6자 이상이어야 해요'; return null; }
+    return { email, password };
+  }
+
+  $('authSignupBtn').addEventListener('click', async ()=>{
+    const input = validateAuthInputs();
+    if (!input) return;
+
+    $('authSignupBtn').disabled = true;
+    $('authLoginBtn').disabled = true;
+    $('authSignupBtn').textContent = '가입 중…';
+    try {
+      const { data, error } = await sb.auth.signUp({ email: input.email, password: input.password });
+      if (error) throw error;
+
+      if (data.session && data.user){
+        // email confirmation is off — logged in immediately
+        myUserId = data.user.id;
+        myEmail = data.user.email;
+        const migratedCount = await migrateLegacyLocalIntoSupabase(myUserId);
+        await startApp();
+        if (migratedCount > 0) toast(`기존 기록 ${migratedCount}개를 클라우드로 옮겼어요`);
+      } else {
+        // email confirmation is required before the account can log in
+        $('authInfo').textContent = '✓ 가입 확인 이메일을 보냈어요. 이메일 확인 후 로그인해주세요.';
+      }
+    } catch(e){
+      console.error('Sign up failed:', e);
+      $('authError').textContent = `❌ ${e.message || '가입에 실패했어요'}`;
+    } finally {
+      $('authSignupBtn').disabled = false;
+      $('authLoginBtn').disabled = false;
+      $('authSignupBtn').textContent = '회원가입';
+    }
+  });
+
+  $('authLoginBtn').addEventListener('click', async ()=>{
+    const input = validateAuthInputs();
+    if (!input) return;
+
+    $('authSignupBtn').disabled = true;
+    $('authLoginBtn').disabled = true;
+    $('authLoginBtn').textContent = '로그인 중…';
+    try {
+      const { data, error } = await sb.auth.signInWithPassword({ email: input.email, password: input.password });
+      if (error) throw error;
+      myUserId = data.user.id;
+      myEmail = data.user.email;
+      const migratedCount = await migrateLegacyLocalIntoSupabase(myUserId);
+      await startApp();
+      if (migratedCount > 0) toast(`기존 기록 ${migratedCount}개를 클라우드로 옮겼어요`);
+    } catch(e){
+      console.error('Login failed:', e);
+      $('authError').textContent = `❌ ${e.message === 'Invalid login credentials' ? '이메일 또는 비밀번호가 올바르지 않아요' : (e.message || '로그인에 실패했어요')}`;
+    } finally {
+      $('authSignupBtn').disabled = false;
+      $('authLoginBtn').disabled = false;
+      $('authLoginBtn').textContent = '로그인';
+    }
+  });
+
+  $('meChip').addEventListener('click', async ()=>{
+    if (!confirm('로그아웃할까요?')) return;
+    try { await sb.auth.signOut(); } catch(e){}
+    location.reload();
+  });
 
   init();
 })();
