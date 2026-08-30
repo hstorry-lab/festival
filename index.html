@@ -501,6 +501,15 @@
   .btn-save { background: linear-gradient(135deg, #8FC7F2, #7FD8D0); color: #1B3B39; }
   .hint { font-size: 11px; font-weight: 600; color: rgba(43,76,74,0.4); margin-top: -8px; margin-bottom: 14px; line-height: 1.5; }
 
+  .forgot-pw-row { text-align: right; margin-top: -8px; margin-bottom: 14px; }
+  .forgot-pw-row button {
+    background: none; border: none; padding: 0;
+    font-size: 11px; font-weight: 700;
+    color: #4A7FBF;
+    text-decoration: underline;
+    cursor: pointer;
+  }
+
   .toast {
     position: fixed; bottom: 100px; left: 50%; transform: translateX(-50%);
     background: #2B4C4A; color: #EAF6F3; padding: 11px 20px; border-radius: 20px;
@@ -576,6 +585,9 @@
       <label>비밀번호</label>
       <input type="password" id="authPassword" placeholder="6자 이상" autocomplete="current-password">
     </div>
+    <div class="forgot-pw-row">
+      <button type="button" id="forgotPwLink">비밀번호를 잊으셨나요?</button>
+    </div>
     <div id="authError" style="font-size:11px; font-weight:700; color:#E8734A; margin-bottom:8px;"></div>
     <div id="authInfo" style="font-size:11px; font-weight:700; color:#2B8A7E; margin-bottom:8px;"></div>
     <div class="modal-actions">
@@ -584,49 +596,23 @@
     </div>
   </div>
 </div>
-<!-- Password Reset Modal -->
-<div class="modal-bg" id="resetBg" style="z-index:80;">
+
+<!-- Set a new password — shown after clicking the reset link in the email -->
+<div class="modal-bg" id="resetPwBg" style="z-index:75;">
   <div class="modal">
-    <h3>🔐 새 비밀번호 설정</h3>
-
-    <div class="hint" style="margin-top:-10px;">
-      새로 사용할 비밀번호를 입력해주세요.
-    </div>
-
+    <h3>🔑 새 비밀번호 설정</h3>
+    <div class="hint" style="margin-top:-10px; margin-bottom:16px;">새로 쓸 비밀번호를 입력해주세요.</div>
     <div class="field">
       <label>새 비밀번호</label>
-      <input
-        type="password"
-        id="newPassword"
-        placeholder="6자 이상"
-        autocomplete="new-password"
-      >
+      <input type="password" id="newPassword" placeholder="6자 이상" autocomplete="new-password">
     </div>
-
-    <div class="field">
-      <label>새 비밀번호 확인</label>
-      <input
-        type="password"
-        id="newPasswordConfirm"
-        placeholder="한 번 더 입력해주세요"
-        autocomplete="new-password"
-      >
-    </div>
-
-    <div
-      id="resetError"
-      style="font-size:11px; font-weight:700; color:#E8734A; margin-bottom:8px;"
-    ></div>
-
+    <div id="resetPwError" style="font-size:11px; font-weight:700; color:#E8734A; margin-bottom:8px;"></div>
     <div class="modal-actions">
-      <button class="btn-save" id="resetPasswordBtn" style="width:100%;">
-        비밀번호 변경
-      </button>
+      <button class="btn-save" id="resetPwSubmit" style="width:100%;">비밀번호 변경하기</button>
     </div>
   </div>
 </div>
 
- 
 <!-- Add/Edit Modal -->
 <div class="modal-bg" id="modalBg">
   <div class="modal">
@@ -866,6 +852,7 @@
 
   let myUserId = null;   // Supabase auth user's UUID — used to scope entries
   let myEmail = null;    // for display in the header chip
+  let appStarted = false; // guards the onAuthStateChange listener against firing before first login
 
   // Map between our in-app entry shape (camelCase) and the Supabase table columns (snake_case)
   function entryToRow(entry, userId){
@@ -982,7 +969,25 @@
   // directly by user id, so there's no separate id-list index to maintain.
   async function saveIndex(){ /* no-op with Supabase backend */ }
 
+  // Re-checks the actual Supabase session right before a write, instead of trusting
+  // the in-memory myUserId — if the session silently expired/cleared in the
+  // background, this catches it with a clear error instead of a request that either
+  // fails invisibly or (worse) appears to succeed while writing nothing.
+  async function requireLiveSession(){
+    const { data: { session } } = await sb.auth.getSession();
+    if (!session || !session.user){
+      throw new Error('로그인이 풀렸어요. 새로고침해서 다시 로그인해주세요.');
+    }
+    if (session.user.id !== myUserId){
+      // in-memory id had drifted from the actual logged-in account — resync
+      myUserId = session.user.id;
+      myEmail = session.user.email;
+    }
+    return session;
+  }
+
   async function saveEntry(entry){
+    await requireLiveSession();
     const row = entryToRow(entry, myUserId);
     const { error } = await sb.from('entries').upsert(row, { onConflict: 'id' });
     if (error){
@@ -993,6 +998,7 @@
 
   async function deleteEntryStorage(id){
     try {
+      await requireLiveSession();
       const { error } = await sb.from('entries').delete().eq('id', id).eq('user_nickname', myUserId);
       if (error) console.error('deleteEntryStorage (Supabase) failed:', error);
     } catch(e){ console.error('deleteEntryStorage (Supabase) failed:', e); }
@@ -1017,16 +1023,37 @@
   }
 
   async function migrateLegacyLocalIntoSupabase(userId){
+    // Only ever run once per browser — this used to run on every login, which
+    // meant stale local copies (e.g. missing a memo added later) could silently
+    // overwrite newer, already-synced cloud data on every re-login. Never again.
+    const MIGRATED_FLAG_KEY = 'stubs_legacy_migrated_v1';
+    try { if (localStorage.getItem(MIGRATED_FLAG_KEY) === '1') return 0; } catch(e){}
+
     const legacy = await loadLegacyLocalEntries();
-    if (!legacy.length) return 0;
+    if (!legacy.length){
+      try { localStorage.setItem(MIGRATED_FLAG_KEY, '1'); } catch(e){}
+      return 0;
+    }
+
+    // Fetch which ids already exist in the cloud for this account, so migration
+    // can only ever ADD missing entries — it must never overwrite a row that's
+    // already there, no matter how many times this function ends up running.
+    let existingIds = new Set();
+    try {
+      const { data, error } = await sb.from('entries').select('id').eq('user_nickname', userId);
+      if (!error && data) existingIds = new Set(data.map(r => r.id));
+    } catch(e){ console.error('Could not check existing cloud entries before migrating:', e); }
+
     let migrated = 0;
     for (const entry of legacy){
+      if (existingIds.has(entry.id)) continue; // already synced — never overwrite
       try {
         const row = entryToRow(entry, userId);
-        const { error } = await sb.from('entries').upsert(row, { onConflict: 'id' });
+        const { error } = await sb.from('entries').insert(row);
         if (!error) migrated++;
       } catch(e){ console.error('Migration of one entry failed:', e); }
     }
+    try { localStorage.setItem(MIGRATED_FLAG_KEY, '1'); } catch(e){}
     return migrated;
   }
 
@@ -2061,57 +2088,7 @@
       }
     }
   };
-// ---------- Password Recovery ----------
-sb.auth.onAuthStateChange((event, session) => {
-  if (event === 'PASSWORD_RECOVERY') {
-    $('resetBg').classList.add('open');
-    $('newPassword').focus();
-  }
-});
 
-$('resetPasswordBtn').addEventListener('click', async () => {
-  const password = $('newPassword').value;
-  const confirmPassword = $('newPasswordConfirm').value;
-
-  $('resetError').textContent = '';
-
-  if (!password || password.length < 6) {
-    $('resetError').textContent = '비밀번호는 6자 이상이어야 해요';
-    return;
-  }
-
-  if (password !== confirmPassword) {
-    $('resetError').textContent = '비밀번호가 서로 달라요';
-    return;
-  }
-
-  const btn = $('resetPasswordBtn');
-  btn.disabled = true;
-  btn.textContent = '변경 중…';
-
-  try {
-    const { error } = await sb.auth.updateUser({
-      password: password
-    });
-
-    if (error) throw error;
-
-    $('resetBg').classList.remove('open');
-    $('newPassword').value = '';
-    $('newPasswordConfirm').value = '';
-
-    toast('비밀번호가 변경됐어요 🎉');
-
-  } catch (e) {
-    console.error('Password reset failed:', e);
-    $('resetError').textContent =
-      `❌ ${e.message || '비밀번호 변경에 실패했어요'}`;
-  } finally {
-    btn.disabled = false;
-    btn.textContent = '비밀번호 변경';
-  }
-});
- 
   // ---------- Init ----------
   async function init(){
     const now = new Date();
@@ -2119,6 +2096,40 @@ $('resetPasswordBtn').addEventListener('click', async () => {
     calMonth = now.getMonth();
 
     $('loadingScreen').style.display = 'none';
+
+    let inRecoveryFlow = false;
+
+    // If the session silently disappears (expired, cleared, signed out in another
+    // tab) while the app is already running, bounce back to the login screen right
+    // away instead of letting stale in-memory state cause writes that quietly fail.
+    sb.auth.onAuthStateChange((event, session)=>{
+      if (event === 'PASSWORD_RECOVERY'){
+        // User followed the reset-password link from their email — ask for a new
+        // password instead of dropping them straight into the app.
+        inRecoveryFlow = true;
+        $('authBg').classList.remove('open');
+        $('app').style.display = 'none';
+        $('resetPwError').textContent = '';
+        $('resetPwBg').classList.add('open');
+        $('newPassword').focus();
+        return;
+      }
+      if (appStarted && (event === 'SIGNED_OUT' || !session)){
+        myUserId = null;
+        myEmail = null;
+        appStarted = false;
+        $('app').style.display = 'none';
+        $('authError').textContent = '';
+        $('authInfo').textContent = '로그인이 풀렸어요. 다시 로그인해주세요.';
+        $('authBg').classList.add('open');
+      }
+    });
+
+    // Give onAuthStateChange a brief moment to fire PASSWORD_RECOVERY first if the
+    // page was opened from a reset-password email link (its tokens are parsed from
+    // the URL asynchronously right after the client initializes).
+    await new Promise(r => setTimeout(r, 50));
+    if (inRecoveryFlow) return;
 
     // supabase-js persists the session in the browser automatically —
     // if one exists already, log straight back in without asking again.
@@ -2147,6 +2158,7 @@ $('resetPasswordBtn').addEventListener('click', async () => {
     await loadBacklog();
     renderAll();
     $('app').style.display = 'block';
+    appStarted = true;
   }
 
   function validateAuthInputs(){
@@ -2220,6 +2232,55 @@ $('resetPasswordBtn').addEventListener('click', async () => {
     if (!confirm('로그아웃할까요?')) return;
     try { await sb.auth.signOut(); } catch(e){}
     location.reload();
+  });
+
+  $('forgotPwLink').addEventListener('click', async ()=>{
+    const email = $('authEmail').value.trim();
+    $('authError').textContent = '';
+    $('authInfo').textContent = '';
+    if (!email){ $('authError').textContent = '먼저 이메일을 입력해주세요'; return; }
+
+    $('forgotPwLink').disabled = true;
+    $('forgotPwLink').textContent = '보내는 중…';
+    try {
+      // Redirect back to this same page after the person clicks the link in the email.
+      const redirectTo = window.location.href.split('#')[0].split('?')[0];
+      const { error } = await sb.auth.resetPasswordForEmail(email, { redirectTo });
+      if (error) throw error;
+      $('authInfo').textContent = '✓ 비밀번호 재설정 이메일을 보냈어요. 메일함을 확인해주세요.';
+    } catch(e){
+      console.error('Password reset request failed:', e);
+      $('authError').textContent = `❌ ${e.message || '이메일 전송에 실패했어요'}`;
+    } finally {
+      $('forgotPwLink').disabled = false;
+      $('forgotPwLink').textContent = '비밀번호를 잊으셨나요?';
+    }
+  });
+
+  $('resetPwSubmit').addEventListener('click', async ()=>{
+    const newPw = $('newPassword').value;
+    $('resetPwError').textContent = '';
+    if (!newPw || newPw.length < 6){ $('resetPwError').textContent = '비밀번호는 6자 이상이어야 해요'; return; }
+
+    $('resetPwSubmit').disabled = true;
+    $('resetPwSubmit').textContent = '변경 중…';
+    try {
+      const { data, error } = await sb.auth.updateUser({ password: newPw });
+      if (error) throw error;
+      $('resetPwBg').classList.remove('open');
+      myUserId = data.user.id;
+      myEmail = data.user.email;
+      const migratedCount = await migrateLegacyLocalIntoSupabase(myUserId);
+      await startApp();
+      toast('비밀번호가 변경됐어요');
+      if (migratedCount > 0) toast(`기존 기록 ${migratedCount}개를 클라우드로 옮겼어요`);
+    } catch(e){
+      console.error('Password update failed:', e);
+      $('resetPwError').textContent = `❌ ${e.message || '비밀번호 변경에 실패했어요'}`;
+    } finally {
+      $('resetPwSubmit').disabled = false;
+      $('resetPwSubmit').textContent = '비밀번호 변경하기';
+    }
   });
 
   init();
